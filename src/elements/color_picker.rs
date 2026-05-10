@@ -14,6 +14,15 @@ const SV_SIZE_PX: f32 = 160.;
 const HUE_STRIP_W_PX: f32 = 22.;
 const HUE_SEGMENTS: usize = 12;
 
+fn rgba_to_hex(value: Rgba) -> String {
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (value.r * 255.) as u8,
+        (value.g * 255.) as u8,
+        (value.b * 255.) as u8,
+    )
+}
+
 fn hsl_from_degrees(h_deg: f32, s: f32, l: f32) -> crate::Hsla {
     hsla((h_deg / 360.).rem_euclid(1.), s.clamp(0., 1.), l.clamp(0., 1.), 1.)
 }
@@ -80,70 +89,93 @@ pub fn color_picker_with_weak<V: 'static>(
 
     div()
         .flex()
-        .flex_row()
-        .gap(px(8.))
+        .flex_col()
+        .gap(px(10.))
         .child(
             div()
-                .relative()
-                .w(px(SV_SIZE_PX))
-                .h(px(SV_SIZE_PX))
-                .rounded(px(6.))
-                .overflow_hidden()
-                .border_1()
-                .border_color(crate::rgba(0x00000080))
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .bg(sv_gradient_h),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .bg(sv_gradient_v),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(dot_y))
-                        .left(px(dot_x))
-                        .w(px(10.))
-                        .h(px(10.))
-                        .rounded_full()
-                        .border_2()
-                        .border_color(white())
-                        .shadow_md(),
-                )
-                .on_mouse_down_with_hitbox(MouseButton::Left, pick_sv),
-        )
-        .child({
-            let hue_strip = div()
                 .flex()
-                .flex_col()
-                .flex_none()
-                .w(px(HUE_STRIP_W_PX))
-                .h(px(SV_SIZE_PX))
-                .rounded(px(6.))
-                .overflow_hidden()
-                .border_1()
-                .border_color(crate::rgba(0x00000080))
-                .children((0..HUE_SEGMENTS).map(|i| {
-                    let hue = i as f32 * (360. / HUE_SEGMENTS as f32);
+                .flex_row()
+                .gap(px(8.))
+                .child(
                     div()
-                        .flex_1()
-                        .w_full()
-                        .bg(hsl_from_degrees(hue, 1., 0.5))
-                }))
-                .on_mouse_down_with_hitbox(MouseButton::Left, pick_hue);
-            hue_strip
-        })
+                        .relative()
+                        .w(px(SV_SIZE_PX))
+                        .h(px(SV_SIZE_PX))
+                        .rounded(px(6.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(crate::rgba(0x00000080))
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .bg(sv_gradient_h),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .bg(sv_gradient_v),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top(px(dot_y))
+                                .left(px(dot_x))
+                                .w(px(10.))
+                                .h(px(10.))
+                                .rounded_full()
+                                .border_2()
+                                .border_color(white())
+                                .shadow_md(),
+                        )
+                        .on_mouse_down_with_hitbox(MouseButton::Left, pick_sv),
+                )
+                .child({
+                    let hue_strip = div()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .w(px(HUE_STRIP_W_PX))
+                        .h(px(SV_SIZE_PX))
+                        .rounded(px(6.))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(crate::rgba(0x00000080))
+                        .children((0..HUE_SEGMENTS).map(|i| {
+                            let hue = i as f32 * (360. / HUE_SEGMENTS as f32);
+                            div()
+                                .flex_1()
+                                .w_full()
+                                .bg(hsl_from_degrees(hue, 1., 0.5))
+                        }))
+                        .on_mouse_down_with_hitbox(MouseButton::Left, pick_hue);
+                    hue_strip
+                }),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .w(px(28.))
+                        .h(px(28.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .border_color(crate::rgba(0x00000080))
+                        .bg(value),
+                )
+                .child(div().text_xs().child(rgba_to_hex(value))),
+        )
 }
 
 /// Interactive HSV color picker (opaque RGB). Rebuild each frame with the current [`Rgba`]; clicks
