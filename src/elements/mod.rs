@@ -1,5 +1,6 @@
 mod anchored;
 mod animation;
+mod color_picker;
 mod canvas;
 mod deferred;
 mod div;
@@ -9,11 +10,13 @@ mod list;
 mod surface;
 mod svg;
 mod text;
+mod glyph_border;
 mod uniform_list;
 
 pub use anchored::*;
 pub use animation::*;
 pub use canvas::*;
+pub use color_picker::*;
 pub use deferred::*;
 pub use div::*;
 pub use image_cache::*;
@@ -22,4 +25,5 @@ pub use list::*;
 pub use surface::*;
 pub use svg::*;
 pub use text::*;
+pub use glyph_border::*;
 pub use uniform_list::*;

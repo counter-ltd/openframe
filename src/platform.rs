@@ -8,6 +8,9 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 
+#[cfg(target_os = "ios")]
+mod ios;
+
 #[cfg(any(
     all(
         any(target_os = "linux", target_os = "freebsd"),
@@ -76,6 +79,8 @@ pub use keystroke::*;
 pub(crate) use linux::*;
 #[cfg(target_os = "macos")]
 pub(crate) use mac::*;
+#[cfg(target_os = "ios")]
+pub use ios::*;
 pub use semantic_version::SemanticVersion;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
@@ -93,6 +98,11 @@ pub fn background_executor() -> BackgroundExecutor {
 #[cfg(target_os = "macos")]
 pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
     Rc::new(MacPlatform::new(headless))
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn current_platform(headless: bool) -> Rc<dyn Platform> {
+    IosPlatform::new(headless)
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]

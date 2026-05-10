@@ -856,6 +856,59 @@ impl From<Rgba> for Background {
     }
 }
 
+/// Converts [`Rgba`] (opaque channels only) to HSV with hue in degrees `[0, 360)`, saturation and
+/// value in `[0, 1]`.
+pub fn rgb_to_hsv(rgb: Rgba) -> (f32, f32, f32) {
+    let r = rgb.r.clamp(0., 1.);
+    let g = rgb.g.clamp(0., 1.);
+    let b = rgb.b.clamp(0., 1.);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let v = max;
+    let s = if max <= 1e-8 { 0. } else { d / max };
+    let h_deg = if d <= 1e-8 {
+        0.
+    } else if max == r {
+        60. * (((g - b) / d).rem_euclid(6.))
+    } else if max == g {
+        60. * ((b - r) / d + 2.)
+    } else {
+        60. * ((r - g) / d + 4.)
+    };
+    let h_deg = if h_deg < 0. { h_deg + 360. } else { h_deg };
+    (h_deg, s, v)
+}
+
+/// Converts HSV to opaque [`Rgba`]. Hue is in degrees (wraps with `rem_euclid`).
+pub fn hsv_to_rgb(h_deg: f32, s: f32, v: f32) -> Rgba {
+    let h = h_deg.rem_euclid(360.);
+    let s = s.clamp(0., 1.);
+    let v = v.clamp(0., 1.);
+    let c = v * s;
+    let x = c * (1. - ((h / 60.) % 2. - 1.).abs());
+    let m = v - c;
+    let (rp, gp, bp) = if h < 60. {
+        (c, x, 0.)
+    } else if h < 120. {
+        (x, c, 0.)
+    } else if h < 180. {
+        (0., c, x)
+    } else if h < 240. {
+        (0., x, c)
+    } else if h < 300. {
+        (x, 0., c)
+    } else {
+        (c, 0., x)
+    };
+    Rgba {
+        r: rp + m,
+        g: gp + m,
+        b: bp + m,
+        a: 1.,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -930,5 +983,28 @@ mod tests {
         assert_eq!(background.opacity(0.5).colors[1], to.opacity(0.5));
         assert!(!background.is_transparent());
         assert!(background.opacity(0.0).is_transparent());
+    }
+
+    #[test]
+    fn test_hsv_roundtrip_is_close() {
+        let samples = [
+            rgba(0xff0000ff),
+            rgba(0x00ff00ff),
+            rgba(0x0000ffff),
+            rgba(0xffffffff),
+            rgba(0x8040c0ff),
+        ];
+        for c in samples {
+            let (h, s, v) = rgb_to_hsv(c);
+            let back = hsv_to_rgb(h, s, v);
+            assert!(
+                (back.r - c.r).abs() < 0.02
+                    && (back.g - c.g).abs() < 0.02
+                    && (back.b - c.b).abs() < 0.02,
+                "roundtrip {:?} -> ({h},{s},{v}) -> {:?}",
+                c,
+                back
+            );
+        }
     }
 }

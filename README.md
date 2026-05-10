@@ -48,6 +48,21 @@ On macOS, GPUI uses Metal for rendering. In order to use Metal, you need to do t
   sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
   ```
 
+#### iOS (cross-compile from macOS)
+
+OpenFrame includes a **`target_os = "ios"`** platform backend under `src/platform/ios/` (UIKit pasteboard, Grand Central Dispatch executors, Metal shader bundle from `build.rs`). Desktop/Linux dependency closure is unchanged: iOS-only crates are declared under `[target.'cfg(target_os = "ios")'.dependencies]` in `Cargo.toml`.
+
+Add Rust targets and verify:
+
+```sh
+rustup target add aarch64-apple-ios
+rustup target add aarch64-apple-ios-sim   # optional; Simulator
+cd Libraries/OpenFrame
+cargo check --target aarch64-apple-ios
+```
+
+**Embedding model:** On iOS, `UIApplicationMain` owns the run loop. `Application::run` schedules your launch callback on the **main dispatch queue** (`IosPlatform::run` → `schedule_application_launch`); it does **not** mirror macOS `NSApplication` blocking behavior. Host Swift/UIKit code should call into Rust after `UIApplication` has started; bridge touch → GPUI by mapping touches to mouse-style [`PlatformInput`](src/interactive.rs) events and delivering them through [`IosWindow::inject_platform_input`](src/platform/ios/window.rs). Optional: [`IosWindow::set_host_metal_layer_ptr`](src/platform/ios/window.rs) stores an opaque pointer to the host `CAMetalLayer` for Metal presentation wiring.
+
 ## The Big Picture
 
 GPUI offers three different [registers](<https://en.wikipedia.org/wiki/Register_(sociolinguistics)>) depending on your needs:

@@ -134,6 +134,24 @@ impl Interactivity {
             }));
     }
 
+    /// Like [`Self::on_mouse_down`], but passes this element's [`Hitbox`] so callers can map
+    /// `event.position` into local coordinates (`event.position - hitbox.origin`).
+    pub fn on_mouse_down_with_hitbox(
+        &mut self,
+        button: MouseButton,
+        listener: impl Fn(&MouseDownEvent, &Hitbox, &mut Window, &mut App) + 'static,
+    ) {
+        self.mouse_down_listeners
+            .push(Box::new(move |event, phase, hitbox, window, cx| {
+                if phase == DispatchPhase::Bubble
+                    && event.button == button
+                    && hitbox.is_hovered(window)
+                {
+                    (listener)(event, hitbox, window, cx)
+                }
+            }));
+    }
+
     /// Bind the given callback to the mouse down event for any button, during the capture phase
     /// The imperative API equivalent of [`InteractiveElement::capture_any_mouse_down`]
     ///
@@ -699,6 +717,16 @@ pub trait InteractiveElement: Sized {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.interactivity().on_mouse_down(button, listener);
+        self
+    }
+
+    /// Bubble-phase mouse down with [`Hitbox`] for coordinate mapping (see [`Interactivity::on_mouse_down_with_hitbox`]).
+    fn on_mouse_down_with_hitbox(
+        mut self,
+        button: MouseButton,
+        listener: impl Fn(&MouseDownEvent, &Hitbox, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.interactivity().on_mouse_down_with_hitbox(button, listener);
         self
     }
 
