@@ -1,7 +1,8 @@
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::Inspector;
 use crate::{
-    Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
+    AccessibilityProperties, Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App,
+    AppContext, Arena, Asset,
     AsyncWindowContext, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow, Capslock,
     Context, Corners, CursorStyle, Decorations, DevicePixels, DispatchActionListener,
     DispatchNodeId, DispatchTree, DisplayId, Edges, Effect, Entity, EntityId, EventEmitter,
@@ -15,7 +16,8 @@ use crate::{
     SharedString, Size, StrikethroughStyle, Style, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextStyle, TextStyleRefinement,
     TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowTextSystem,
+    WindowBounds, WindowControls, WindowDecorations, WindowOptions, WindowParams, WindowStacking,
+    WindowTextSystem,
     point, prelude::*, px, rems, size, transparent_black,
 };
 use anyhow::{Context as _, Result, anyhow};
@@ -533,6 +535,8 @@ pub struct Hitbox {
     pub content_mask: ContentMask<Pixels>,
     /// Flags that specify hitbox behavior.
     pub behavior: HitboxBehavior,
+    /// Optional accessibility metadata for assistive technologies.
+    pub accessibility: Option<AccessibilityProperties>,
 }
 
 impl Hitbox {
@@ -948,6 +952,8 @@ impl Window {
             window_decorations,
             #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
             tabbing_identifier,
+            mouse_passthrough,
+            stacking,
         } = options;
 
         let bounds = window_bounds
@@ -968,6 +974,8 @@ impl Window {
                 window_min_size,
                 #[cfg(target_os = "macos")]
                 tabbing_identifier,
+                mouse_passthrough,
+                stacking,
             },
         )?;
 
@@ -1694,6 +1702,16 @@ impl Window {
         self.platform_window.resize(size);
     }
 
+    /// Map or unmap the native window (e.g. overlay HUD) without closing it.
+    pub fn set_visibility(&mut self, visible: bool) {
+        self.platform_window.set_visibility(visible);
+    }
+
+    /// Update native stacking tier (HUD / system UI, etc.).
+    pub fn set_stacking(&mut self, stacking: WindowStacking) {
+        self.platform_window.set_stacking(stacking);
+    }
+
     /// Returns whether or not the window is currently fullscreen
     pub fn is_fullscreen(&self) -> bool {
         self.platform_window.is_fullscreen()
@@ -1941,6 +1959,8 @@ impl Window {
         let previous_window_active = self.rendered_frame.window_active;
         mem::swap(&mut self.rendered_frame, &mut self.next_frame);
         self.next_frame.clear();
+        #[cfg(target_os = "ios")]
+        crate::platform::sync_ios_accessibility_hitboxes(&self.rendered_frame.hitboxes);
         let current_focus_path = self.rendered_frame.focus_path();
         let current_window_active = self.rendered_frame.window_active;
 
@@ -3303,6 +3323,25 @@ impl Window {
     ///
     /// This method should only be called as part of the prepaint phase of element drawing.
     pub fn insert_hitbox(&mut self, bounds: Bounds<Pixels>, behavior: HitboxBehavior) -> Hitbox {
+        self.insert_hitbox_impl(bounds, behavior, None)
+    }
+
+    /// Like [`Self::insert_hitbox`], but attaches accessibility metadata for platform bridges (iOS VoiceOver).
+    pub fn insert_hitbox_with_accessibility(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        behavior: HitboxBehavior,
+        accessibility: AccessibilityProperties,
+    ) -> Hitbox {
+        self.insert_hitbox_impl(bounds, behavior, Some(accessibility))
+    }
+
+    fn insert_hitbox_impl(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        behavior: HitboxBehavior,
+        accessibility: Option<AccessibilityProperties>,
+    ) -> Hitbox {
         self.invalidator.debug_assert_prepaint();
 
         let content_mask = self.content_mask();
@@ -3313,6 +3352,7 @@ impl Window {
             bounds,
             content_mask,
             behavior,
+            accessibility,
         };
         self.next_frame.hitboxes.push(hitbox.clone());
         hitbox

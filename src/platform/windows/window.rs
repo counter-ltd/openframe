@@ -1,7 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     num::NonZeroIsize,
     path::PathBuf,
     rc::{Rc, Weak},
@@ -74,6 +74,7 @@ pub(crate) struct WindowsWindowInner {
     pub(crate) validation_number: usize,
     pub(crate) main_receiver: flume::Receiver<Runnable>,
     pub(crate) platform_window_handle: HWND,
+    pub(crate) window_stacking: Cell<WindowStacking>,
 }
 
 impl WindowsWindowState {
@@ -206,6 +207,28 @@ impl WindowsWindowState {
 }
 
 impl WindowsWindowInner {
+    pub(crate) fn apply_window_stacking(&self) {
+        let topmost = matches!(
+            self.window_stacking.get(),
+            WindowStacking::Hud | WindowStacking::SystemUi
+        );
+        unsafe {
+            let _ = SetWindowPos(
+                self.hwnd,
+                Some(if topmost {
+                    HWND_TOPMOST
+                } else {
+                    HWND_NOTOPMOST
+                }),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
+
     fn new(context: &mut WindowCreateContext, hwnd: HWND, cs: &CREATESTRUCTW) -> Result<Rc<Self>> {
         let state = RefCell::new(WindowsWindowState::new(
             hwnd,
@@ -232,6 +255,7 @@ impl WindowsWindowInner {
             main_receiver: context.main_receiver.clone(),
             platform_window_handle: context.platform_window_handle,
             system_settings: RefCell::new(WindowsSystemSettings::new(context.display)),
+            window_stacking: Cell::new(context.window_stacking),
         }))
     }
 
@@ -356,6 +380,7 @@ struct WindowCreateContext {
     appearance: WindowAppearance,
     disable_direct_composition: bool,
     directx_devices: DirectXDevices,
+    window_stacking: WindowStacking,
 }
 
 impl WindowsWindow {
@@ -406,6 +431,9 @@ impl WindowsWindow {
 
             (WS_EX_APPWINDOW, dwstyle)
         };
+        if params.mouse_passthrough {
+            dwexstyle |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_LAYERED;
+        }
         if !disable_direct_composition {
             dwexstyle |= WS_EX_NOREDIRECTIONBITMAP;
         }
@@ -435,6 +463,7 @@ impl WindowsWindow {
             appearance,
             disable_direct_composition,
             directx_devices,
+            window_stacking: params.stacking,
         };
         let creation_result = unsafe {
             CreateWindowExW(
@@ -457,6 +486,8 @@ impl WindowsWindow {
         // so check the inner result first.
         let this = context.inner.take().unwrap()?;
         let hwnd = creation_result?;
+
+        this.apply_window_stacking();
 
         register_drag_drop(&this)?;
         configure_dwm_dark_mode(hwnd, appearance);
@@ -851,6 +882,22 @@ impl PlatformWindow for WindowsWindow {
 
     fn get_raw_handle(&self) -> HWND {
         self.0.hwnd
+    }
+
+    fn set_visibility(&mut self, visible: bool) {
+        unsafe {
+            let cmd = if visible {
+                SW_SHOWNOACTIVATE
+            } else {
+                SW_HIDE
+            };
+            let _ = ShowWindow(self.0.hwnd, cmd);
+        }
+    }
+
+    fn set_stacking(&mut self, stacking: WindowStacking) {
+        self.0.window_stacking.set(stacking);
+        self.0.apply_window_stacking();
     }
 
     fn gpu_specs(&self) -> Option<GpuSpecs> {

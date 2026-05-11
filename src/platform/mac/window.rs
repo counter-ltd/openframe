@@ -5,7 +5,8 @@ use crate::{
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformAtlas, PlatformDisplay,
     PlatformInput, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
     SharedString, Size, SystemWindowTab, Timer, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControlArea, WindowKind, WindowParams, dispatch_get_main_queue,
+    WindowBounds, WindowControlArea, WindowKind, WindowParams, WindowStacking,
+    dispatch_get_main_queue,
     dispatch_sys::dispatch_async_f, platform::PlatformInputHandler, point, px, size,
 };
 use block::ConcreteBlock;
@@ -66,6 +67,8 @@ const NSWindowStyleMaskNonactivatingPanel: NSWindowStyleMask =
 const NSNormalWindowLevel: NSInteger = 0;
 #[allow(non_upper_case_globals)]
 const NSPopUpWindowLevel: NSInteger = 101;
+#[allow(non_upper_case_globals)]
+const NSFloatingWindowLevel: NSInteger = 3;
 #[allow(non_upper_case_globals)]
 const NSTrackingMouseEnteredAndExited: NSUInteger = 0x01;
 #[allow(non_upper_case_globals)]
@@ -385,6 +388,19 @@ unsafe fn build_window_class(name: &'static str, superclass: &Class) -> *const C
     }
 }
 
+fn mac_window_level(kind: WindowKind, stacking: WindowStacking) -> NSInteger {
+    match stacking {
+        WindowStacking::Auto => match kind {
+            WindowKind::PopUp => NSPopUpWindowLevel,
+            WindowKind::Floating | WindowKind::Normal => NSNormalWindowLevel,
+        },
+        WindowStacking::Normal => NSNormalWindowLevel,
+        WindowStacking::Floating => NSFloatingWindowLevel,
+        WindowStacking::Hud => NSPopUpWindowLevel,
+        WindowStacking::SystemUi => NSPopUpWindowLevel + 1,
+    }
+}
+
 struct MacWindowState {
     handle: AnyWindowHandle,
     executor: ForegroundExecutor,
@@ -419,6 +435,8 @@ struct MacWindowState {
     select_previous_tab_callback: Option<Box<dyn FnMut()>>,
     toggle_tab_bar_callback: Option<Box<dyn FnMut()>>,
     activated_least_once: bool,
+    kind: WindowKind,
+    stacking: WindowStacking,
 }
 
 impl MacWindowState {
@@ -582,6 +600,8 @@ impl MacWindow {
             display_id,
             window_min_size,
             tabbing_identifier,
+            mouse_passthrough,
+            stacking,
         }: WindowParams,
         executor: ForegroundExecutor,
         renderer_context: renderer::Context,
@@ -595,6 +615,14 @@ impl MacWindow {
             } else {
                 let () = msg_send![class!(NSWindow), setAllowsAutomaticWindowTabbing: NO];
             }
+
+            let effective_kind = if matches!(stacking, WindowStacking::Hud | WindowStacking::SystemUi)
+                && !matches!(kind, WindowKind::PopUp)
+            {
+                WindowKind::PopUp
+            } else {
+                kind
+            };
 
             let mut style_mask;
             if let Some(titlebar) = titlebar.as_ref() {
@@ -617,7 +645,7 @@ impl MacWindow {
                     | NSWindowStyleMask::NSFullSizeContentViewWindowMask;
             }
 
-            let native_window: id = match kind {
+            let native_window: id = match effective_kind {
                 WindowKind::Normal | WindowKind::Floating => msg_send![WINDOW_CLASS, alloc],
                 WindowKind::PopUp => {
                     style_mask |= NSWindowStyleMaskNonactivatingPanel;
@@ -725,6 +753,8 @@ impl MacWindow {
                 select_previous_tab_callback: None,
                 toggle_tab_bar_callback: None,
                 activated_least_once: false,
+                kind,
+                stacking,
             })));
 
             (*native_window).set_ivar(
@@ -775,9 +805,8 @@ impl MacWindow {
             content_view.addSubview_(native_view.autorelease());
             native_window.makeFirstResponder_(native_view);
 
-            match kind {
+            match effective_kind {
                 WindowKind::Normal | WindowKind::Floating => {
-                    native_window.setLevel_(NSNormalWindowLevel);
                     native_window.setAcceptsMouseMovedEvents_(YES);
 
                     if let Some(tabbing_identifier) = tabbing_identifier {
@@ -802,7 +831,6 @@ impl MacWindow {
                     let _: () =
                         msg_send![native_view, addTrackingArea: tracking_area.autorelease()];
 
-                    native_window.setLevel_(NSPopUpWindowLevel);
                     let _: () = msg_send![
                         native_window,
                         setAnimationBehavior: NSWindowAnimationBehaviorUtilityWindow
@@ -812,6 +840,12 @@ impl MacWindow {
                         NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
                     );
                 }
+            }
+
+            native_window.setLevel_(mac_window_level(kind, stacking));
+
+            if mouse_passthrough {
+                let _: () = msg_send![native_window, setIgnoresMouseEvents: YES];
             }
 
             let app = NSApplication::sharedApplication(nil);
@@ -1480,6 +1514,28 @@ impl PlatformWindow for MacWindow {
 
     fn gpu_specs(&self) -> Option<crate::GpuSpecs> {
         None
+    }
+
+    fn set_visibility(&mut self, visible: bool) {
+        let native_window = self.0.lock().native_window;
+        unsafe {
+            if visible {
+                let _: () = msg_send![native_window, orderFront: nil];
+            } else {
+                let _: () = msg_send![native_window, orderOut: nil];
+            }
+        }
+    }
+
+    fn set_stacking(&mut self, stacking: WindowStacking) {
+        let mut guard = self.0.lock();
+        guard.stacking = stacking;
+        let native_window = guard.native_window;
+        let level = mac_window_level(guard.kind, stacking);
+        drop(guard);
+        unsafe {
+            native_window.setLevel_(level);
+        }
     }
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {

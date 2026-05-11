@@ -7,7 +7,7 @@ use crate::{
     Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
     Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, ScaledPixels, Scene, Size,
     Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowDecorations, WindowKind, WindowParams, X11ClientStatePtr, px, size,
+    WindowDecorations, WindowKind, WindowParams, WindowStacking, X11ClientStatePtr, px, size,
 };
 
 use blade_graphics as gpu;
@@ -19,7 +19,9 @@ use x11rb::{
     errors::ConnectionError,
     properties::WmSizeHints,
     protocol::{
+        shape,
         sync,
+        xfixes,
         xinput::{self, ConnectionExt as _},
         xproto::{self, ClientMessageEvent, ConnectionExt, TranslateCoordinatesReply},
     },
@@ -66,6 +68,7 @@ x11rb::atom_manager! {
         _NET_WM_STATE_FULLSCREEN,
         _NET_WM_STATE_HIDDEN,
         _NET_WM_STATE_FOCUSED,
+        _NET_WM_STATE_ABOVE,
         _NET_ACTIVE_WINDOW,
         _NET_WM_SYNC_REQUEST,
         _NET_WM_SYNC_REQUEST_COUNTER,
@@ -273,6 +276,8 @@ pub struct X11WindowState {
     edge_constraints: Option<EdgeConstraints>,
     pub handle: AnyWindowHandle,
     last_insets: [u32; 4],
+    kind: WindowKind,
+    stacking: WindowStacking,
 }
 
 impl X11WindowState {
@@ -640,6 +645,33 @@ impl X11WindowState {
                 ),
             )?;
 
+            if params.mouse_passthrough {
+                use xfixes::ConnectionExt as _;
+                match xcb.extension_information(xfixes::X11_EXTENSION_NAME) {
+                    Ok(Some(_)) => match xcb.generate_id() {
+                        Ok(region) => {
+                            if let Err(e) = xcb.xfixes_create_region(region, &[]) {
+                                log::warn!("xfixes_create_region for mouse passthrough: {e:?}");
+                            } else if let Err(e) = xcb.xfixes_set_window_shape_region(
+                                x_window,
+                                shape::SK::INPUT,
+                                0,
+                                0,
+                                region,
+                            ) {
+                                log::warn!("xfixes_set_window_shape_region for mouse passthrough: {e:?}");
+                            } else if let Err(e) = xcb.xfixes_destroy_region(region) {
+                                log::warn!("xfixes_destroy_region after mouse passthrough: {e:?}");
+                            }
+                        }
+                        Err(e) => log::warn!("X11 mouse passthrough: generate_id failed: {e:?}"),
+                    },
+                    _ => log::warn!(
+                        "XFixes extension unavailable; mouse_passthrough ignored on this X11 connection"
+                    ),
+                }
+            }
+
             xcb_flush(xcb);
 
             let renderer = {
@@ -692,6 +724,8 @@ impl X11WindowState {
                 edge_constraints: None,
                 counter_id: sync_request_counter,
                 last_sync_counter: None,
+                kind: params.kind,
+                stacking: params.stacking,
             })
         });
 
@@ -753,10 +787,18 @@ impl Drop for X11Window {
     }
 }
 
+#[repr(u32)]
 enum WmHintPropertyState {
-    // Remove = 0,
-    // Add = 1,
+    Remove = 0,
+    Add = 1,
     Toggle = 2,
+}
+
+fn x11_net_wm_state_above_desired(stacking: WindowStacking) -> bool {
+    matches!(
+        stacking,
+        WindowStacking::Hud | WindowStacking::SystemUi
+    )
 }
 
 impl X11Window {
@@ -798,6 +840,19 @@ impl X11Window {
 
         let state = ptr.state.borrow_mut();
         ptr.set_wm_properties(state)?;
+        drop(state);
+
+        if x11_net_wm_state_above_desired(ptr.state.borrow().stacking) {
+            let above_atom = ptr.state.borrow().atoms._NET_WM_STATE_ABOVE;
+            ptr
+                .set_wm_hints(
+                    || "X11 SendEvent for _NET_WM_STATE_ABOVE (initial) failed.",
+                    WmHintPropertyState::Add,
+                    above_atom,
+                    0,
+                )
+                .log_err();
+        }
 
         Ok(Self(ptr))
     }
@@ -1375,6 +1430,49 @@ impl PlatformWindow for X11Window {
             self.0.xcb.map_window(self.0.x_window),
         )?;
         Ok(())
+    }
+
+    fn set_visibility(&mut self, visible: bool) {
+        let r = if visible {
+            check_reply(
+                || "X11 MapWindow failed in set_visibility.",
+                self.0.xcb.map_window(self.0.x_window),
+            )
+        } else {
+            check_reply(
+                || "X11 UnmapWindow failed in set_visibility.",
+                self.0.xcb.unmap_window(self.0.x_window),
+            )
+        };
+        r.log_err();
+        xcb_flush(&self.0.xcb);
+    }
+
+    fn set_stacking(&mut self, stacking: WindowStacking) {
+        let (prev, new) = {
+            let mut s = self.0.state.borrow_mut();
+            let prev = x11_net_wm_state_above_desired(s.stacking);
+            s.stacking = stacking;
+            let new = x11_net_wm_state_above_desired(s.stacking);
+            (prev, new)
+        };
+        if prev == new {
+            return;
+        }
+        let above_atom = self.0.state.borrow().atoms._NET_WM_STATE_ABOVE;
+        let action = if new {
+            WmHintPropertyState::Add
+        } else {
+            WmHintPropertyState::Remove
+        };
+        self
+            .set_wm_hints(
+                || "X11 SendEvent for _NET_WM_STATE_ABOVE (set_stacking) failed.",
+                action,
+                above_atom,
+                0,
+            )
+            .log_err();
     }
 
     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance) {

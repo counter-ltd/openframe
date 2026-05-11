@@ -28,7 +28,8 @@ use crate::{
     AnyWindowHandle, Bounds, Decorations, Globals, GpuSpecs, Modifiers, Output, Pixels,
     PlatformDisplay, PlatformInput, Point, PromptButton, PromptLevel, RequestFrameOptions,
     ResizeEdge, Size, Tiling, WaylandClientStatePtr, WindowAppearance, WindowBackgroundAppearance,
-    WindowBounds, WindowControlArea, WindowControls, WindowDecorations, WindowParams, px, size,
+    WindowBounds, WindowControlArea, WindowControls, WindowDecorations, WindowKind, WindowParams,
+    WindowStacking, px, size,
 };
 use crate::{
     Capslock,
@@ -114,6 +115,7 @@ pub struct WaylandWindowState {
     in_progress_window_controls: Option<WindowControls>,
     window_controls: WindowControls,
     client_inset: Option<Pixels>,
+    stacking: WindowStacking,
 }
 
 #[derive(Clone)]
@@ -189,6 +191,7 @@ impl WaylandWindowState {
             in_progress_window_controls: None,
             window_controls: WindowControls::default(),
             client_inset: None,
+            stacking: options.stacking,
         })
     }
 
@@ -293,6 +296,22 @@ impl WaylandWindow {
 
         if let Some(size) = params.window_min_size {
             toplevel.set_min_size(size.width.0 as i32, size.height.0 as i32);
+        }
+
+        if params.mouse_passthrough {
+            log::warn!(
+                "OpenFrame Wayland: mouse_passthrough not implemented; overlay may still receive pointer input until layer-shell input regions are wired."
+            );
+        }
+
+        if !matches!(
+            params.stacking,
+            WindowStacking::Auto | WindowStacking::Normal
+        ) {
+            log::warn!(
+                "OpenFrame Wayland: WindowStacking::{:?} not implemented (xdg-shell only); use X11 or wait for layer-shell integration.",
+                params.stacking
+            );
         }
 
         if let Some(fractional_scale_manager) = globals.fractional_scale_manager.as_ref() {
@@ -1086,6 +1105,19 @@ impl PlatformWindow for WaylandWindow {
         if Some(inset) != state.client_inset {
             state.client_inset = Some(inset);
             update_window(state);
+        }
+    }
+
+    fn set_stacking(&mut self, stacking: WindowStacking) {
+        let prev = self.borrow().stacking;
+        if prev == stacking {
+            return;
+        }
+        self.borrow_mut().stacking = stacking;
+        if !matches!(stacking, WindowStacking::Auto | WindowStacking::Normal) {
+            log::warn!(
+                "OpenFrame Wayland: WindowStacking::{stacking:?} runtime change not applied (layer-shell TBD)."
+            );
         }
     }
 

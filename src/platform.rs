@@ -81,6 +81,10 @@ pub(crate) use linux::*;
 pub(crate) use mac::*;
 #[cfg(target_os = "ios")]
 pub use ios::*;
+#[cfg(target_os = "ios")]
+pub(crate) fn sync_ios_accessibility_hitboxes(hitboxes: &[crate::Hitbox]) {
+    ios::accessibility::sync_from_hitboxes(hitboxes);
+}
 pub use semantic_version::SemanticVersion;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
@@ -557,6 +561,14 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     }
     fn set_client_inset(&self, _inset: Pixels) {}
     fn gpu_specs(&self) -> Option<GpuSpecs>;
+
+    /// Show or hide the native window without tearing down GPUI state.
+    fn set_visibility(&mut self, visible: bool) {
+        let _ = visible;
+    }
+
+    /// Change stacking tier at runtime (best-effort per platform).
+    fn set_stacking(&mut self, _stacking: WindowStacking) {}
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>);
 
@@ -1142,6 +1154,13 @@ pub struct WindowOptions {
 
     /// Tab group name, allows opening the window as a native tab on macOS 10.12+. Windows with the same tabbing identifier will be grouped together.
     pub tabbing_identifier: Option<String>,
+
+    /// When `true`, mouse and touch events pass through to windows below (HUD / overlay mode).
+    /// Unsupported combinations are ignored at runtime with a log on some platforms (see Wayland).
+    pub mouse_passthrough: bool,
+
+    /// Stacking tier passed to the native window (see [`WindowStacking`]).
+    pub stacking: WindowStacking,
 }
 
 /// The variables that can be configured when creating a new window
@@ -1191,6 +1210,12 @@ pub(crate) struct WindowParams {
     pub window_min_size: Option<Size<Pixels>>,
     #[cfg(target_os = "macos")]
     pub tabbing_identifier: Option<String>,
+
+    /// When `true`, the window does not receive pointer input (see [`WindowOptions::mouse_passthrough`]).
+    pub mouse_passthrough: bool,
+
+    /// Stacking tier (see [`WindowStacking`]).
+    pub stacking: WindowStacking,
 }
 
 /// Represents the status of how a window should be opened.
@@ -1249,6 +1274,8 @@ impl Default for WindowOptions {
             window_min_size: None,
             window_decorations: None,
             tabbing_identifier: None,
+            mouse_passthrough: false,
+            stacking: WindowStacking::default(),
         }
     }
 }
@@ -1279,6 +1306,26 @@ pub enum WindowKind {
 
     /// A floating window that appears on top of its parent window
     Floating,
+}
+
+/// Semantic window stacking tier (portable intent — not raw OS z-order integers).
+///
+/// Use [`WindowStacking::Auto`] to preserve legacy [`WindowKind`]-driven stacking on each
+/// platform. [`WindowStacking::Hud`] / [`WindowStacking::SystemUi`] are intended for
+/// [`WindowKind::PopUp`] panels; platforms may still apply level hints on normal windows.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum WindowStacking {
+    /// Stack per [`WindowKind`] only (backward compatible).
+    #[default]
+    Auto,
+    /// Standard application stacking (normal window layer).
+    Normal,
+    /// Floating / elevated within the normal band (platform-specific).
+    Floating,
+    /// Always-on-top HUD-style tier (pairs with popup / passthrough overlays).
+    Hud,
+    /// Higher-than-HUD tier for system-adjacent UI (best-effort; platform limits apply).
+    SystemUi,
 }
 
 /// The appearance of the window, as defined by the operating system.

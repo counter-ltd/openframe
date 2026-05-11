@@ -671,6 +671,30 @@ pub trait InteractiveElement: Sized {
         self
     }
 
+    /// Sets the accessibility label for assistive technologies (for example VoiceOver on iOS).
+    fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.interactivity().accessibility_label = Some(label.into());
+        self
+    }
+
+    /// Optional hint describing the result of interacting with this element.
+    fn accessibility_hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.interactivity().accessibility_hint = Some(hint.into());
+        self
+    }
+
+    /// Raw accessibility traits bitmask (matches UIKit `UIAccessibilityTraits` when bridged).
+    fn accessibility_traits(mut self, traits: u64) -> Self {
+        self.interactivity().accessibility_traits = Some(traits);
+        self
+    }
+
+    /// When true, this element is omitted from accessibility snapshots.
+    fn accessibility_hidden(mut self, hidden: bool) -> Self {
+        self.interactivity().accessibility_hidden = hidden;
+        self
+    }
+
     /// Set the keymap context for this element. This will be used to determine
     /// which action to dispatch from the keymap.
     fn key_context<C, E>(mut self, key_context: C) -> Self
@@ -1553,6 +1577,10 @@ pub struct Interactivity {
     pub(crate) tab_index: Option<isize>,
     pub(crate) tab_group: bool,
     pub(crate) tab_stop: bool,
+    pub(crate) accessibility_label: Option<SharedString>,
+    pub(crate) accessibility_hint: Option<SharedString>,
+    pub(crate) accessibility_traits: Option<u64>,
+    pub(crate) accessibility_hidden: bool,
 
     #[cfg(any(feature = "inspector", debug_assertions))]
     pub(crate) source_location: Option<&'static core::panic::Location<'static>>,
@@ -1702,7 +1730,17 @@ impl Interactivity {
                         style.overflow_mask(bounds, window.rem_size()),
                         |window| {
                             let hitbox = if self.should_insert_hitbox(&style, window, cx) {
-                                Some(window.insert_hitbox(bounds, self.hitbox_behavior))
+                                Some(
+                                    if let Some(props) = self.accessibility_hit_properties() {
+                                        window.insert_hitbox_with_accessibility(
+                                            bounds,
+                                            self.hitbox_behavior,
+                                            props,
+                                        )
+                                    } else {
+                                        window.insert_hitbox(bounds, self.hitbox_behavior)
+                                    },
+                                )
                             } else {
                                 None
                             };
@@ -1716,6 +1754,25 @@ impl Interactivity {
                 })
             },
         )
+    }
+
+    fn accessibility_hit_properties(&self) -> Option<crate::AccessibilityProperties> {
+        if self.accessibility_hidden {
+            return None;
+        }
+        let label = self.accessibility_label.clone()?;
+        let traits = self.accessibility_traits.unwrap_or_else(|| {
+            if !self.click_listeners.is_empty() {
+                crate::ACCESSIBILITY_TRAIT_BUTTON
+            } else {
+                0
+            }
+        });
+        Some(crate::AccessibilityProperties {
+            label,
+            hint: self.accessibility_hint.clone(),
+            traits,
+        })
     }
 
     fn should_insert_hitbox(&self, style: &Style, window: &Window, cx: &App) -> bool {
@@ -1737,6 +1794,7 @@ impl Interactivity {
             || !self.drop_listeners.is_empty()
             || self.tooltip_builder.is_some()
             || window.is_inspector_picking(cx)
+            || (self.accessibility_label.is_some() && !self.accessibility_hidden)
     }
 
     fn clamp_scroll_position(
