@@ -640,6 +640,11 @@ impl MacWindow {
                 if titlebar.appears_transparent {
                     style_mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
                 }
+            } else if matches!(effective_kind, WindowKind::PopUp) {
+                // Borderless for HUD/overlay panels: NSTitledWindowMask causes macOS to constrain
+                // the window frame to visibleFrame (below menu bar, above dock). Without it the
+                // window can cover all screen edges at the configured level.
+                style_mask = NSWindowStyleMask::from_bits_retain(0);
             } else {
                 style_mask = NSWindowStyleMask::NSTitledWindowMask
                     | NSWindowStyleMask::NSFullSizeContentViewWindowMask;
@@ -783,6 +788,7 @@ impl MacWindow {
                 });
             }
 
+            let has_no_titlebar = titlebar.is_none();
             if titlebar.is_none_or(|titlebar| titlebar.appears_transparent) {
                 native_window.setTitlebarAppearsTransparent_(YES);
                 native_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
@@ -836,13 +842,19 @@ impl MacWindow {
                         setAnimationBehavior: NSWindowAnimationBehaviorUtilityWindow
                     ];
                     native_window.setCollectionBehavior_(
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces |
-                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+                        NSWindowCollectionBehavior::NSWindowCollectionBehaviorCanJoinAllSpaces
+                            | NSWindowCollectionBehavior::NSWindowCollectionBehaviorFullScreenAuxiliary
+                            | NSWindowCollectionBehavior::from_bits_retain(1 << 4) // Stationary: no space-switch animation
+                            | NSWindowCollectionBehavior::from_bits_retain(1 << 6) // IgnoresCycle: skip Cmd+` / Cmd+Tab
                     );
                 }
             }
 
             native_window.setLevel_(mac_window_level(kind, stacking));
+
+            if has_no_titlebar && matches!(effective_kind, WindowKind::PopUp) {
+                let _: () = msg_send![native_window, setHasShadow: NO];
+            }
 
             if mouse_passthrough {
                 let _: () = msg_send![native_window, setIgnoresMouseEvents: YES];
