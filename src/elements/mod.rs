@@ -11,6 +11,7 @@ mod surface;
 mod svg;
 mod text;
 mod glyph_border;
+mod tooltip;
 mod uniform_list;
 
 pub use anchored::*;
@@ -26,4 +27,5 @@ pub use surface::*;
 pub use svg::*;
 pub use text::*;
 pub use glyph_border::*;
+pub use tooltip::*;
 pub use uniform_list::*;
