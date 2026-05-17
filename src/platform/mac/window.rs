@@ -70,6 +70,8 @@ const NSPopUpWindowLevel: NSInteger = 101;
 #[allow(non_upper_case_globals)]
 const NSFloatingWindowLevel: NSInteger = 3;
 #[allow(non_upper_case_globals)]
+const NSMainMenuWindowLevel: NSInteger = 24;
+#[allow(non_upper_case_globals)]
 const NSTrackingMouseEnteredAndExited: NSUInteger = 0x01;
 #[allow(non_upper_case_globals)]
 const NSTrackingMouseMoved: NSUInteger = 0x02;
@@ -398,6 +400,7 @@ fn mac_window_level(kind: WindowKind, stacking: WindowStacking) -> NSInteger {
         WindowStacking::Floating => NSFloatingWindowLevel,
         WindowStacking::Hud => NSPopUpWindowLevel,
         WindowStacking::SystemUi => NSPopUpWindowLevel + 1,
+        WindowStacking::BelowMenuBar => NSMainMenuWindowLevel - 1,
     }
 }
 

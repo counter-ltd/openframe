@@ -1326,6 +1326,8 @@ pub enum WindowStacking {
     Hud,
     /// Higher-than-HUD tier for system-adjacent UI (best-effort; platform limits apply).
     SystemUi,
+    /// Just below the system menu bar — content appears in the menu bar area but behind items.
+    BelowMenuBar,
 }
 
 /// The appearance of the window, as defined by the operating system.
