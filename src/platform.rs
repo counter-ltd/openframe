@@ -1383,7 +1383,7 @@ pub enum WindowBackgroundAppearance {
 }
 
 /// The options that can be configured for a file dialog prompt
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct PathPromptOptions {
     /// Should the prompt allow files to be selected?
     pub files: bool,
@@ -1393,6 +1393,10 @@ pub struct PathPromptOptions {
     pub multiple: bool,
     /// The prompt to show to a user when selecting a path
     pub prompt: Option<SharedString>,
+    /// File extensions (without the dot, e.g. `"py"`) the prompt should allow.
+    /// Empty = all files. Directories stay navigable regardless. Currently
+    /// honored on macOS; other platforms ignore it.
+    pub allowed_extensions: Vec<SharedString>,
 }
 
 /// What kind of prompt styling to show

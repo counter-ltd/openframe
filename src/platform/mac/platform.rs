@@ -722,6 +722,16 @@ impl Platform for MacPlatform {
 
                     panel.setCanCreateDirectories(true.to_objc());
                     panel.setResolvesAliases_(false.to_objc());
+
+                    if !options.allowed_extensions.is_empty() {
+                        let ext_ids: Vec<id> = options
+                            .allowed_extensions
+                            .iter()
+                            .map(|e| ns_string(e.as_ref()))
+                            .collect();
+                        let array = NSArray::arrayWithObjects(nil, &ext_ids);
+                        let _: () = msg_send![panel, setAllowedFileTypes: array];
+                    }
                     let done_tx = Cell::new(Some(done_tx));
                     let block = ConcreteBlock::new(move |response: NSModalResponse| {
                         let result = if response == NSModalResponse::NSModalResponseOk {
